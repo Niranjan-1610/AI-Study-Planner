@@ -1,0 +1,210 @@
+diff --git a/node_modules/@tambo-ai/typescript-sdk/lib/advance-stream.js b/node_modules/@tambo-ai/typescript-sdk/lib/advance-stream.js
+index 81261aa..c4038d3 100644
+--- a/node_modules/@tambo-ai/typescript-sdk/lib/advance-stream.js
++++ b/node_modules/@tambo-ai/typescript-sdk/lib/advance-stream.js
+@@ -15,6 +15,14 @@ async function advanceStream(client, body, threadId, options) {
+                 },
+             });
+             const response = await responsePromise.asResponse();
++            if (response.ok && !response.body) {
++                const fallback = threadId
++                    ? await client.beta.threads.advanceByID(threadId, body, options)
++                    : await client.beta.threads.advance({ body, ...options });
++                return (async function* () {
++                    yield fallback;
++                })();
++            }
+             return handleStreamResponse(response);
+         }
+         catch (error) {
+@@ -31,22 +39,48 @@ async function* handleStreamResponse(response) {
+     const decoder = new TextDecoder();
+     const MAX_CHUNK_RETRIES = 5;
+     let chunkRetryCount = 0;
++    if (!response.ok) {
++        let bodyText = '';
++        try {
++            bodyText = await response.text();
++        }
++        catch {
++            bodyText = '';
++        }
++        const status = `${response.status} ${response.statusText}`.trim();
++        throw new Error(`Streaming request failed (${status || response.status})${bodyText ? `: ${bodyText}` : ''}`);
++    }
++    if (!response.body) {
++        throw new Error('Streaming response has no body.');
++    }
+     const reader = response.body.getReader();
++    let buffer = '';
+     while (true) {
+         try {
+             const { done, value: chunk } = await reader.read();
+             if (done)
+                 break;
+-            const text = decoder.decode(chunk);
+-            const messages = text.split('\n').filter((msg) => msg.trim());
+-            for (const msg of messages) {
+-                if (msg === 'data: DONE') {
++            buffer += decoder.decode(chunk, { stream: true });
++            const lines = buffer.split('\n');
++            buffer = lines.pop() ?? '';
++            for (const raw of lines) {
++                const msg = raw.trim();
++                if (!msg) {
++                    continue;
++                }
++                if (msg === 'data: DONE' || msg === 'data: [DONE]' || msg === '[DONE]') {
++                    continue;
++                }
++                if (msg.startsWith(':')) {
++                    continue;
++                }
++                if (msg.startsWith('event:') || msg.startsWith('id:') || msg.startsWith('retry:')) {
+                     continue;
+                 }
+                 if (msg.startsWith('error: ')) {
+                     throw new Error(msg.slice(7));
+                 }
+-                const jsonStr = msg.startsWith('data: ') ? msg.slice(6) : msg;
++                const jsonStr = msg.startsWith('data: ') ? msg.slice(6).trim() : msg;
+                 if (!jsonStr) {
+                     continue;
+                 }
+@@ -69,5 +103,29 @@ async function* handleStreamResponse(response) {
+             throw error;
+         }
+     }
++    const tail = buffer.trim();
++    if (tail) {
++        if (tail === 'data: DONE' || tail === 'data: [DONE]' || tail === '[DONE]') {
++            return;
++        }
++        if (tail.startsWith(':')) {
++            return;
++        }
++        if (tail.startsWith('event:') || tail.startsWith('id:') || tail.startsWith('retry:')) {
++            return;
++        }
++        if (tail.startsWith('error: ')) {
++            throw new Error(tail.slice(7));
++        }
++        const jsonStr = tail.startsWith('data: ') ? tail.slice(6).trim() : tail;
++        if (!jsonStr) {
++            return;
++        }
++        try {
++            yield JSON.parse(jsonStr);
++        }
++        catch (e) {
++            throw new Error('Failed to parse JSON after multiple chunks.');
++        }
++    }
+ }
+-//# sourceMappingURL=advance-stream.js.map
+\ No newline at end of file
+diff --git a/node_modules/@tambo-ai/typescript-sdk/lib/advance-stream.mjs b/node_modules/@tambo-ai/typescript-sdk/lib/advance-stream.mjs
+index f9f7f3b..7f9bd8c 100644
+--- a/node_modules/@tambo-ai/typescript-sdk/lib/advance-stream.mjs
++++ b/node_modules/@tambo-ai/typescript-sdk/lib/advance-stream.mjs
+@@ -12,6 +12,14 @@ export async function advanceStream(client, body, threadId, options) {
+                 },
+             });
+             const response = await responsePromise.asResponse();
++            if (response.ok && !response.body) {
++                const fallback = threadId
++                    ? await client.beta.threads.advanceByID(threadId, body, options)
++                    : await client.beta.threads.advance({ body, ...options });
++                return (async function* () {
++                    yield fallback;
++                })();
++            }
+             return handleStreamResponse(response);
+         }
+         catch (error) {
+@@ -28,22 +36,48 @@ async function* handleStreamResponse(response) {
+     const decoder = new TextDecoder();
+     const MAX_CHUNK_RETRIES = 5;
+     let chunkRetryCount = 0;
++    if (!response.ok) {
++        let bodyText = '';
++        try {
++            bodyText = await response.text();
++        }
++        catch {
++            bodyText = '';
++        }
++        const status = `${response.status} ${response.statusText}`.trim();
++        throw new Error(`Streaming request failed (${status || response.status})${bodyText ? `: ${bodyText}` : ''}`);
++    }
++    if (!response.body) {
++        throw new Error('Streaming response has no body.');
++    }
+     const reader = response.body.getReader();
++    let buffer = '';
+     while (true) {
+         try {
+             const { done, value: chunk } = await reader.read();
+             if (done)
+                 break;
+-            const text = decoder.decode(chunk);
+-            const messages = text.split('\n').filter((msg) => msg.trim());
+-            for (const msg of messages) {
+-                if (msg === 'data: DONE') {
++            buffer += decoder.decode(chunk, { stream: true });
++            const lines = buffer.split('\n');
++            buffer = lines.pop() ?? '';
++            for (const raw of lines) {
++                const msg = raw.trim();
++                if (!msg) {
++                    continue;
++                }
++                if (msg === 'data: DONE' || msg === 'data: [DONE]' || msg === '[DONE]') {
++                    continue;
++                }
++                if (msg.startsWith(':')) {
++                    continue;
++                }
++                if (msg.startsWith('event:') || msg.startsWith('id:') || msg.startsWith('retry:')) {
+                     continue;
+                 }
+                 if (msg.startsWith('error: ')) {
+                     throw new Error(msg.slice(7));
+                 }
+-                const jsonStr = msg.startsWith('data: ') ? msg.slice(6) : msg;
++                const jsonStr = msg.startsWith('data: ') ? msg.slice(6).trim() : msg;
+                 if (!jsonStr) {
+                     continue;
+                 }
+@@ -66,5 +100,29 @@ async function* handleStreamResponse(response) {
+             throw error;
+         }
+     }
++    const tail = buffer.trim();
++    if (tail) {
++        if (tail === 'data: DONE' || tail === 'data: [DONE]' || tail === '[DONE]') {
++            return;
++        }
++        if (tail.startsWith(':')) {
++            return;
++        }
++        if (tail.startsWith('event:') || tail.startsWith('id:') || tail.startsWith('retry:')) {
++            return;
++        }
++        if (tail.startsWith('error: ')) {
++            throw new Error(tail.slice(7));
++        }
++        const jsonStr = tail.startsWith('data: ') ? tail.slice(6).trim() : tail;
++        if (!jsonStr) {
++            return;
++        }
++        try {
++            yield JSON.parse(jsonStr);
++        }
++        catch (e) {
++            throw new Error('Failed to parse JSON after multiple chunks.');
++        }
++    }
+ }
+-//# sourceMappingURL=advance-stream.mjs.map
+\ No newline at end of file
